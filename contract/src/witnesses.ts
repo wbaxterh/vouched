@@ -1,4 +1,5 @@
-// This file is part of midnightntwrk/example-bboard.
+// This file is part of wbaxterh/vouched.
+// Portions derived from midnightntwrk/example-bboard.
 // Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,61 +15,49 @@
 // limitations under the License.
 
 /*
- * This file defines the shape of the bulletin board's private state,
- * as well as the single witness function that accesses it.
+ * The private state for vouched is a single purchase secret held in the
+ * buyer's wallet. Commitments and nullifiers are derived from it per
+ * product, so one secret supports any number of purchases while every
+ * on-chain artifact stays unlinkable.
  */
 
-import { Ledger } from "./managed/bboard/contract/index.js";
+import { Ledger } from "./managed/vouched/contract/index.js";
 import { WitnessContext } from "@midnight-ntwrk/midnight-js-protocol/compact-runtime";
 
-/* **********************************************************************
- * The only hidden state needed by the bulletin board contract is
- * the user's secret key.  Some of the library code and
- * compiler-generated code is parameterized by the type of our
- * private state, so we define a type for it and a function to
- * make an object of that type.
- */
-
-export type BBoardPrivateState = {
-  readonly secretKey: Uint8Array;
+export type VouchedPrivateState = {
+  readonly purchaseSecret: Uint8Array;
 };
 
-export const createBBoardPrivateState = (secretKey: Uint8Array) => ({
-  secretKey,
+export const createVouchedPrivateState = (purchaseSecret: Uint8Array) => ({
+  purchaseSecret,
 });
 
-/* **********************************************************************
- * The witnesses object for the bulletin board contract is an object
- * with a field for each witness function, mapping the name of the function
- * to its implementation.
+/*
+ * Two witnesses:
  *
- * The implementation of each function always takes as its first argument
- * a value of type WitnessContext<L, PS>, where L is the ledger object type
- * that corresponds to the ledger declaration in the Compact code, and PS
- *  is the private state type, like BBoardPrivateState defined above.
- *
- * A WitnessContext has three
- * fields:
- *  - ledger: T
- *  - privateState: PS
- *  - contractAddress: string
- *
- * The other arguments (after the first) to each witness function
- * correspond to the ones declared in Compact for the witness function.
- * The function's return value is a tuple of the new private state and
- * the declared return value.  In this case, that's a BBoardPrivateState
- * and a Uint8Array (because the contract declared a return value of Bytes[32],
- * and that's a Uint8Array in TypeScript).
- *
- * The localSecretKey witness does not need the ledger or contractAddress
- * from the WitnessContext, so it uses the parameter notation that puts
- * only the binding for the privateState in scope.
+ * - purchaseSecret returns the buyer's secret from private state.
+ * - findPurchasePath answers a Merkle path query for a commitment from the
+ *   PUBLIC tree state (WitnessContext.ledger). The path itself is private
+ *   input to the circuit; only the tree root it hashes to is disclosed.
  */
 export const witnesses = {
-  localSecretKey: ({
+  purchaseSecret: ({
     privateState,
-  }: WitnessContext<Ledger, BBoardPrivateState>): [
-    BBoardPrivateState,
+  }: WitnessContext<Ledger, VouchedPrivateState>): [
+    VouchedPrivateState,
     Uint8Array,
-  ] => [privateState, privateState.secretKey],
+  ] => [privateState, privateState.purchaseSecret],
+
+  findPurchasePath: (
+    { privateState, ledger }: WitnessContext<Ledger, VouchedPrivateState>,
+    commitment: Uint8Array,
+  ): [VouchedPrivateState, ReturnType<Ledger["purchases"]["pathForLeaf"]>] => {
+    const path = ledger.purchases.findPathForLeaf(commitment);
+    if (path === undefined) {
+      throw new Error(
+        "no purchase commitment found on-chain for this product and secret",
+      );
+    }
+    return [privateState, path];
+  },
 };

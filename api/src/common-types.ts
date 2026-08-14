@@ -1,4 +1,5 @@
-// This file is part of midnightntwrk/example-bboard.
+// This file is part of wbaxterh/vouched.
+// Portions derived from midnightntwrk/example-bboard.
 // Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,86 +15,77 @@
 // limitations under the License.
 
 /**
- * Bulletin board common types and abstractions.
+ * Vouched common types and abstractions.
  *
  * @module
  */
 
 import { type MidnightProviders } from '@midnight-ntwrk/midnight-js-types';
 import { type FoundContract } from '@midnight-ntwrk/midnight-js-contracts';
-import type { State, BBoardPrivateState, Contract, Witnesses } from '../../contract/src/index';
+import type { VouchedPrivateState, Contract, Witnesses } from '../../contract/src/index';
 
-export const bboardPrivateStateKey = 'bboardPrivateState';
-export type PrivateStateId = typeof bboardPrivateStateKey;
+export const vouchedPrivateStateKey = 'vouchedPrivateState';
+export type PrivateStateId = typeof vouchedPrivateStateKey;
 
 /**
- * The private states consumed throughout the application.
- *
- * @remarks
- * {@link PrivateStates} can be thought of as a type that describes a schema for all
- * private states for all contracts used in the application. Each key represents
- * the type of private state consumed by a particular type of contract.
- * The key is used by the deployed contract when interacting with a private state provider,
- * and the type (i.e., `typeof PrivateStates[K]`) represents the type of private state
- * expected to be returned.
- *
- * Since there is only one contract type for the bulletin board example, we only define a
- * single key/type in the schema.
+ * Schema of all private states used by the application: one key, the
+ * buyer's purchase secret.
  *
  * @public
  */
 export type PrivateStates = {
-  /**
-   * Key used to provide the private state for {@link BBoardContract} deployments.
-   */
-  readonly bboardPrivateState: BBoardPrivateState;
+  readonly vouchedPrivateState: VouchedPrivateState;
 };
 
 /**
- * Represents a bulletin board contract and its private state.
+ * The vouched contract with its private state and witnesses.
  *
  * @public
  */
-export type BBoardContract = Contract<BBoardPrivateState, Witnesses<BBoardPrivateState>>;
+export type VouchedContract = Contract<VouchedPrivateState, Witnesses<VouchedPrivateState>>;
 
 /**
- * The keys of the circuits exported from {@link BBoardContract}.
+ * The keys of the impure circuits exported from {@link VouchedContract}.
  *
  * @public
  */
-export type BBoardCircuitKeys = Exclude<keyof BBoardContract['impureCircuits'], number | symbol>;
+export type VouchedCircuitKeys = Exclude<keyof VouchedContract['impureCircuits'], number | symbol>;
 
 /**
- * The providers required by {@link BBoardContract}.
+ * The providers required by {@link VouchedContract}.
  *
  * @public
  */
-export type BBoardProviders = MidnightProviders<BBoardCircuitKeys, PrivateStateId, BBoardPrivateState>;
+export type VouchedProviders = MidnightProviders<VouchedCircuitKeys, PrivateStateId, VouchedPrivateState>;
 
 /**
- * A {@link BBoardContract} that has been deployed to the network.
+ * A {@link VouchedContract} that has been deployed to the network.
  *
  * @public
  */
-export type DeployedBBoardContract = FoundContract<BBoardContract>;
+export type DeployedVouchedContract = FoundContract<VouchedContract>;
 
 /**
- * A type that represents the derived combination of public (or ledger), and private state.
+ * A single verified review as read back from the public ledger. Every field
+ * is public by construction; none of them can be linked to the purchase
+ * that authorized it.
  */
-export type BBoardDerivedState = {
-  readonly state: State;
-  readonly sequence: bigint;
-  readonly message: string | undefined;
-
-  /**
-   * A readonly flag that determines if the current message was posted by the current user.
-   *
-   * @remarks
-   * The `owner` property of the public (or ledger) state is the public key of the message owner, while
-   * the `secretKey` property of {@link BBoardPrivateState} is the secret key of the current user. If
-   * `owner` corresponds to the public key derived from `secretKey`, then `isOwner` is `true`.
-   */
-  readonly isOwner: boolean;
+export type VouchedReview = {
+  /** Hex-encoded nullifier that keys this review on-chain. */
+  readonly nullifier: string;
+  /** Hex-encoded 32-byte product id the review is for. */
+  readonly productId: string;
+  readonly rating: bigint;
+  readonly text: string;
 };
 
-// TODO: for some reason I needed to include "@midnight-ntwrk/wallet-sdk-address-format": "1.0.0-rc.1", should we bump in to rc-2 ?
+/**
+ * The derived combination of public ledger state and the current user's
+ * private state.
+ */
+export type VouchedDerivedState = {
+  /** Number of purchase commitments recorded (Merkle tree leaves used). */
+  readonly purchaseCount: bigint;
+  readonly reviewCount: bigint;
+  readonly reviews: VouchedReview[];
+};
