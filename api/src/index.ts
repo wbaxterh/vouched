@@ -85,6 +85,14 @@ export class VouchedAPI implements DeployedVouchedAPI {
   ) {
     this.deployedContractAddress = deployedContract.deployTxData.public.contractAddress;
     providers.privateStateProvider.setContractAddress(this.deployedContractAddress);
+    // Read the private state exactly once and share the promise. The level
+    // private state provider opens the store with an exclusive lock per
+    // operation, so two overlapping reads (e.g. state$ construction racing
+    // a commitmentFor call) fail with 'Database failed to open'. The
+    // purchase secret never changes during a session, so caching is safe.
+    this.privateStatePromise = providers.privateStateProvider.get(
+      vouchedPrivateStateKey,
+    ) as Promise<VouchedPrivateState>;
     this.state$ = combineLatest(
       [
         providers.publicDataProvider.contractStateObservable(this.deployedContractAddress, { type: 'latest' }).pipe(
@@ -98,7 +106,7 @@ export class VouchedAPI implements DeployedVouchedAPI {
             }),
           ),
         ),
-        from(providers.privateStateProvider.get(vouchedPrivateStateKey) as Promise<VouchedPrivateState>),
+        from(this.privateStatePromise),
       ],
       (ledgerState, _privateState) => {
         const reviews: VouchedReview[] = [];
@@ -124,6 +132,8 @@ export class VouchedAPI implements DeployedVouchedAPI {
 
   readonly state$: Observable<VouchedDerivedState>;
 
+  private readonly privateStatePromise: Promise<VouchedPrivateState>;
+
   async recordPurchase(commitment: Uint8Array): Promise<void> {
     this.logger?.info(`recordingPurchase: ${toHex(commitment)}`);
 
@@ -139,9 +149,7 @@ export class VouchedAPI implements DeployedVouchedAPI {
   }
 
   async commitmentFor(productId: Uint8Array): Promise<Uint8Array> {
-    const privateState = (await this.providers.privateStateProvider.get(
-      vouchedPrivateStateKey,
-    )) as VouchedPrivateState;
+    const privateState = await this.privateStatePromise;
     return Vouched.pureCircuits.purchaseCommitment(privateState.purchaseSecret, productId);
   }
 

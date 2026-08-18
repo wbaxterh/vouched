@@ -11,6 +11,7 @@
     "lint": "eslint src",
     "prepack": "npm run build",
     "standalone": "node --experimental-specifier-resolution=node --loader ts-node/esm src/launcher/standalone.ts",
+    "e2e": "node --experimental-specifier-resolution=node --loader ts-node/esm src/launcher/e2e.ts",
     "preview-remote": "node --experimental-specifier-resolution=node --loader ts-node/esm src/launcher/preview.ts",
     "preprod-remote": "node --experimental-specifier-resolution=node --loader ts-node/esm src/launcher/preprod.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
