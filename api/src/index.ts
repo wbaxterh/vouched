@@ -51,6 +51,18 @@ export const productIdFromName = (name: string): Uint8Array => {
 };
 
 /**
+ * Inverse of {@link productIdFromName} for display purposes: strips the
+ * zero padding and decodes the UTF-8 name.
+ */
+export const productNameFromId = (id: Uint8Array): string => {
+  let end = id.length;
+  while (end > 0 && id[end - 1] === 0) {
+    end -= 1;
+  }
+  return new TextDecoder().decode(id.slice(0, end));
+};
+
+/**
  * An API for a deployed vouched contract.
  */
 export interface DeployedVouchedAPI {
