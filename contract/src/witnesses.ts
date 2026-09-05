@@ -32,12 +32,40 @@ export const createVouchedPrivateState = (purchaseSecret: Uint8Array) => ({
   purchaseSecret,
 });
 
+/** The Merkle path type the compiler generated for the purchases tree. */
+export type PurchasePath = ReturnType<Ledger["purchases"]["pathForLeaf"]>;
+
+/*
+ * TEST HOOK, used only by the scripted e2e. Makes findPurchasePath answer
+ * with a supplied path for one commitment instead of the path the ledger
+ * holds, so a test can hand the circuit a real path for a DIFFERENT leaf
+ * and prove that `assert(path.leaf == commitment)` rejects it. Nothing in
+ * the API sets this; production callers never touch it.
+ */
+let forgedPathForTest:
+  { readonly commitment: string; readonly path: PurchasePath } | undefined;
+
+const hex = (bytes: Uint8Array): string =>
+  Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+
+export const forgePurchasePathForTest = (
+  commitment: Uint8Array,
+  path: PurchasePath,
+): void => {
+  forgedPathForTest = { commitment: hex(commitment), path };
+};
+
+export const clearForgedPurchasePathForTest = (): void => {
+  forgedPathForTest = undefined;
+};
+
 /*
  * Two witnesses:
  *
  * - purchaseSecret returns the buyer's secret from private state.
  * - findPurchasePath answers a Merkle path query for a commitment from the
- *   PUBLIC tree state (WitnessContext.ledger). The path itself is private
+ *   PUBLIC tree state (WitnessContext.ledger), unless the e2e test hook
+ *   above forged one for this commitment. The path itself is private
  *   input to the circuit; only the tree root it hashes to is disclosed.
  */
 export const witnesses = {
@@ -51,7 +79,13 @@ export const witnesses = {
   findPurchasePath: (
     { privateState, ledger }: WitnessContext<Ledger, VouchedPrivateState>,
     commitment: Uint8Array,
-  ): [VouchedPrivateState, ReturnType<Ledger["purchases"]["pathForLeaf"]>] => {
+  ): [VouchedPrivateState, PurchasePath] => {
+    if (
+      forgedPathForTest !== undefined &&
+      forgedPathForTest.commitment === hex(commitment)
+    ) {
+      return [privateState, forgedPathForTest.path];
+    }
     const path = ledger.purchases.findPathForLeaf(commitment);
     if (path === undefined) {
       throw new Error(

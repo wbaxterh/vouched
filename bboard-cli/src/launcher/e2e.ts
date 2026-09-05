@@ -23,7 +23,9 @@
  *   3. post a review backed by a ZK membership proof
  *   4. post a second review of the same purchase  -> nullifier rejects it
  *   5. review 'never-bought' with no purchase     -> no Merkle path exists
- *   6. print the public ledger view and a PASS/FAIL verdict
+ *   6. buy 'wheels-set', then review it with the skateboard-pro Merkle
+ *      path forged into the witness       -> 'path is not for this purchase'
+ *   7. print the public ledger view and a PASS/FAIL verdict
  */
 
 import { WebSocket } from 'ws';
@@ -47,7 +49,12 @@ import { waitForUnshieldedFunds } from '../wallet-utils';
 import { getVouchedLedgerState } from '../index.js';
 import { createLogger } from '../logger-utils.js';
 import { StandaloneConfig } from '../config.js';
-import { type VouchedPrivateState } from '../../../contract/src/witnesses.js';
+import {
+  type VouchedPrivateState,
+  type PurchasePath,
+  forgePurchasePathForTest,
+  clearForgedPurchasePathForTest,
+} from '../../../contract/src/witnesses.js';
 
 // @ts-expect-error: It's needed to enable WebSocket usage through apollo
 globalThis.WebSocket = WebSocket;
@@ -146,7 +153,43 @@ try {
     logger.info(`Unverified review rejected: '${unverifiedRejected}'`);
   }
 
-  // 6. public ledger view and verdict
+  // 6. forged witness path: buy a second product, then review it with the
+  //    FIRST purchase's Merkle path. Both leaves are real and the path
+  //    hashes to the current root, so the only thing between this and a
+  //    review the buyer has not earned for that product is the leaf
+  //    binding, assert(path.leaf == commitment).
+  const otherProductId = productIdFromName('wheels-set');
+  const otherCommitment = await api.commitmentFor(otherProductId);
+  await api.recordPurchase(otherCommitment);
+  logger.info(`Second purchase recorded on-chain: ${toHex(otherCommitment)}`);
+  const forgeDeadline = Date.now() + 60_000;
+  let forgedPath: PurchasePath | undefined;
+  for (;;) {
+    const state = await getVouchedLedgerState(providers, api.deployedContractAddress);
+    if (state !== null && state.purchases.firstFree() >= 2n) {
+      forgedPath = state.purchases.findPathForLeaf(commitment);
+      break;
+    }
+    if (Date.now() > forgeDeadline) {
+      throw new Error('Timed out waiting for the second purchase to appear in indexed state');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+  if (forgedPath === undefined) {
+    throw new Error('first purchase is missing from the indexed tree');
+  }
+  let forgedRejected: string | undefined;
+  forgePurchasePathForTest(otherCommitment, forgedPath);
+  try {
+    await api.postReview(otherProductId, 4n, 'Reviewing wheels-set with the skateboard-pro path');
+  } catch (e) {
+    forgedRejected = e instanceof Error ? e.message : String(e);
+    logger.info(`Forged-path review rejected: '${forgedRejected}'`);
+  } finally {
+    clearForgedPurchasePathForTest();
+  }
+
+  // 7. public ledger view and verdict
   const ledgerState = await getVouchedLedgerState(providers, api.deployedContractAddress);
   if (ledgerState === null) {
     throw new Error('Contract state not found after the run');
@@ -162,6 +205,12 @@ try {
   check('review posted with ZK proof', ledgerState.reviewCount === 1n);
   check('duplicate review rejected by nullifier', duplicateRejected !== undefined);
   check('review without purchase rejected', unverifiedRejected !== undefined);
+  check(
+    "review with another purchase's Merkle path rejected with 'path is not for this purchase'",
+    toHex(forgedPath.leaf) === toHex(commitment) &&
+      forgedRejected !== undefined &&
+      forgedRejected.includes('path is not for this purchase'),
+  );
   logger.info(failures === 0 ? 'E2E RESULT: PASS' : `E2E RESULT: FAIL (${failures} failed checks)`);
   process.exitCode = failures === 0 ? 0 : 1;
 } catch (e) {
